@@ -89,7 +89,7 @@ def extract_screening_data(transcript):
         "biometrics": {
             "gender": "string (must be one of: Male, Female, Non-Binary)",
             "dateOfBirth": "string (format: MM/DD/YYYY)",
-            "age": "number",
+            "age": "number" (calculated if dateOfBirth present),
             "height": "number (in cm)",
             "weight": "number (in kg)",
             "bmi": "number (calculated if height and weight present)",
@@ -103,11 +103,12 @@ def extract_screening_data(transcript):
     Important rules:
     1. Only extract information explicitly mentioned in the transcript
     2. Set fields to null if not mentioned
-    3. Mobile numbers must start with +91
+    3. Mobile numbers must start with +254
     4. Dates must be in DD/MM/YYYY format
     5. Convert any yes/no responses to true/false
     6. Calculate BMI if both height and weight are provided using: weight (kg) / (height (m))^2
     7. Validate all fields against their required types and options
+    8. Calculate age if date of birth is present using the current date
     """
 
     try:
@@ -126,8 +127,8 @@ def extract_screening_data(transcript):
         # Post-process the data
         if "bioData" in structured_data:
             if structured_data["bioData"].get("mobileNumber"):
-                if not structured_data["bioData"]["mobileNumber"].startswith("+91"):
-                    structured_data["bioData"]["mobileNumber"] = "+91" + structured_data["bioData"]["mobileNumber"].lstrip("+")
+                if not structured_data["bioData"]["mobileNumber"].startswith("+254"):
+                    structured_data["bioData"]["mobileNumber"] = "+254" + structured_data["bioData"]["mobileNumber"].lstrip("+")
         
         if "biometrics" in structured_data:
             biometrics = structured_data["biometrics"]

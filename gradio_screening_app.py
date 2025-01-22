@@ -8,16 +8,22 @@ import sounddevice as sd
 from scipy.io import wavfile
 from openai import OpenAI
 from datetime import datetime
+from pydub import AudioSegment
 from new_ import transcribe_audio, extract_screening_data, save_screening_data
 
-
-def process_audio(audio):
+def process_audio(audio, audio_type):
     output_folder = "recorded_audio"
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = os.path.join(output_folder, f"screening_{timestamp}.wav")
-    wavfile.write(file_path, audio[0], audio[1])
+    
+    if audio_type == "microphone":
+        file_path = os.path.join(output_folder, f"screening_{timestamp}.wav")
+        wavfile.write(file_path, audio[0], audio[1])
+    else:  
+        file_path = os.path.join(output_folder, f"screening_{timestamp}.wav")
+        audio_segment = AudioSegment.from_mp3(audio)
+        audio_segment.export(file_path, format="wav")
     
     transcript = transcribe_audio(file_path)
     
@@ -30,22 +36,14 @@ def process_audio(audio):
     else:
         return "Failed to extract screening data. Please try again.", transcript
 
-# Gradio interface
-def gradio_interface(audio):
-    result, transcript = process_audio(audio)
-    return result, transcript
-
-def process_audio_and_update_form(audio):
-    # First process the audio and get JSON (using your existing process_audio function)
-    json_data, transcript = process_audio(audio)
+def process_audio_and_update_form(audio, audio_type):
+    json_data, transcript = process_audio(audio, audio_type)
     
-    # Convert string JSON to dict if needed
     if isinstance(json_data, str):
         print(f"json_data: {json_data}")
         json_data = json.loads(json_data)
     
     # Updating the components
-    
     return {
         # Bio Data Tab
         first_name: json_data["bioData"]["firstName"],
@@ -75,8 +73,11 @@ def process_audio_and_update_form(audio):
 
 with gr.Blocks(title="Patient Screening System") as iface:
     with gr.Row():
-        audio_input = gr.Audio(sources=["microphone"], type="numpy", label="Record Audio")
-        
+        with gr.Column():
+            audio_input = gr.Audio(sources=["microphone"], type="numpy", label="Record Audio")
+        with gr.Column():
+            file_input = gr.File(label="Upload MP3 File", file_types=[".mp3"])
+    
     with gr.Row():
         transcript_output = gr.Textbox(label="Transcript", lines=3)
         json_output = gr.JSON(label="Extracted Data")
@@ -122,8 +123,21 @@ with gr.Blocks(title="Patient Screening System") as iface:
 
     # Connect the audio input to update all form fields
     audio_input.change(
-        fn=process_audio_and_update_form,
+        fn=lambda x: process_audio_and_update_form(x, "microphone"),
         inputs=[audio_input],
+        outputs=[
+            first_name, middle_name, last_name, mobile_number,
+            mobile_category, landmark, national_id,
+            gender, date_of_birth, age, height, weight,
+            bmi, is_smoker, has_hypertension,
+            json_output, transcript_output
+        ]
+    )
+
+    # Connect the file input to update all form fields
+    file_input.change(
+        fn=lambda x: process_audio_and_update_form(x.name, "file"),
+        inputs=[file_input],
         outputs=[
             first_name, middle_name, last_name, mobile_number,
             mobile_category, landmark, national_id,
