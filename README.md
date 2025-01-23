@@ -18,7 +18,5 @@ pip install -r requirements.txt
 ## Set up OpenAI API key as an environment variable
 export OPENAI_API_KEY="your_api_key_here"
 
-## Run the Gradio App
-
-## Run the Gradio application
+## Run the Gradio 
 python gradio_screening_app.py
