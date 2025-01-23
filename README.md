@@ -1,6 +1,6 @@
 ## Prerequisites
 
-# Install required Python packages from requirements.txt
+# Install requirements
 !pip install -r requirements.txt
 
 # Clone the repository
