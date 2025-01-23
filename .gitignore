@@ -1,3 +1,5 @@
 screening_data/
 recorded_audio/
 __pycache__/
+medical_review_data/
+.gradio/

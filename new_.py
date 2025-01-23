@@ -11,28 +11,30 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-SCREENING_SCHEMA = {
-    "bioData": {
-        "firstName": "",
-        "middleName": "",
-        "lastName": "",
-        "mobileNumber": "",
-        "mobileNumberCategory": "",
-        "landmark": "",
-        "nationalId": ""
-    },
+MEDICAL_REVIEW_SCHEMA = {
+    "diagnosis": "",
     "biometrics": {
-        "gender": "",
-        "dateOfBirth": "",
-        "age": None,
         "height": None,
         "weight": None,
         "bmi": None,
-        "isRegularSmoker": None
+        "waistCircumference": None
     },
-    "bloodPressure": {
-        "hasHypertensionHistory": None
-    }
+    "bgAndHtn": {
+        "bloodGlucose": None,
+        "systolicBP": None,
+        "diastolicBP": None
+    },
+    "lifestyle": {
+        "smokingStatus": "",
+        "alcoholStatus": "",
+        "dietNutrition": "",
+        "physicalActivity": ""
+    },
+    "examination": {
+        "chiefComplaints": "",
+        "physicalExamination": ""
+    },
+    "physicianNotes": ""
 }
 
 def get_openai_client():
@@ -65,49 +67,47 @@ def transcribe_audio(file_path):
                 file=audio_file
             )
         logger.info("Transcription successful")
-        print('************',transcription.text)
         return transcription.text
     except Exception as e:
         logger.error(f"Transcription error: {str(e)}")
         return ""
 
-def extract_screening_data(transcript):
+def extract_medical_review_data(transcript):
     client = get_openai_client()
     
     system_prompt = """
-    You are a medical screening assistant. Extract patient information from the transcript and create a JSON object that matches exactly this structure:
+    You are a medical review assistant. Extract patient information from the transcript and create a JSON object that matches exactly this structure:
     {
-        "bioData": {
-            "firstName": "string",
-            "middleName": "string (optional)",
-            "lastName": "string",
-            "mobileNumber": "string (must start with +254)",
-            "mobileNumberCategory": "string (must be one of: Personal, Family, Other)",
-            "landmark": "string",
-            "nationalId": "string"
-        },
+        "diagnosis": "string",
         "biometrics": {
-            "gender": "string (must be one of: Male, Female, Non-Binary)",
-            "dateOfBirth": "string (format: MM/DD/YYYY)",
-            "age": "number",
             "height": "number (in cm)",
             "weight": "number (in kg)",
             "bmi": "number (calculated if height and weight present)",
-            "isRegularSmoker": "boolean (true/false)"
+            "waistCircumference": "number (in cm)"
         },
-        "bloodPressure": {
-            "hasHypertensionHistory": "boolean (true/false)"
-        }
+        "bgAndHtn": {
+            "bloodGlucose": "number (in mg/dL)",
+            "systolicBP": "number (in mmHg)",
+            "diastolicBP": "number (in mmHg)"
+        },
+        "lifestyle": {
+            "smokingStatus": "string (must be one of: Never, Former, Current)",
+            "alcoholStatus": "string (must be one of: Never, Former, Current)",
+            "dietNutrition": "string",
+            "physicalActivity": "string"
+        },
+        "examination": {
+            "chiefComplaints": "string",
+            "physicalExamination": "string"
+        },
+        "physicianNotes": "string"
     }
 
     Important rules:
     1. Only extract information explicitly mentioned in the transcript
     2. Set fields to null if not mentioned
-    3. Mobile numbers must start with +91
-    4. Dates must be in DD/MM/YYYY format
-    5. Convert any yes/no responses to true/false
-    6. Calculate BMI if both height and weight are provided using: weight (kg) / (height (m))^2
-    7. Validate all fields against their required types and options
+    3. Calculate BMI if both height and weight are provided using: weight (kg) / (height (m))^2
+    4. Validate all fields against their required types and options
     """
 
     try:
@@ -115,19 +115,12 @@ def extract_screening_data(transcript):
             model="gpt-4",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract patient screening data from this transcript and format it according to the SPICE form structure shown above: {transcript}"}
+                {"role": "user", "content": f"Extract medical review data from this transcript and format it according to the structure shown above: {transcript}"}
             ],
             temperature=0
         )
         
-        # Parse the response
         structured_data = json.loads(response.choices[0].message.content)
-        
-        # Post-process the data
-        if "bioData" in structured_data:
-            if structured_data["bioData"].get("mobileNumber"):
-                if not structured_data["bioData"]["mobileNumber"].startswith("+91"):
-                    structured_data["bioData"]["mobileNumber"] = "+91" + structured_data["bioData"]["mobileNumber"].lstrip("+")
         
         if "biometrics" in structured_data:
             biometrics = structured_data["biometrics"]
@@ -136,51 +129,51 @@ def extract_screening_data(transcript):
                 weight_kg = float(biometrics["weight"])
                 biometrics["bmi"] = round(weight_kg / (height_m * height_m), 2)
         
-        structured_data["screeningDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        structured_data["screeningId"] = f"SCR_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        structured_data["reviewDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        structured_data["reviewId"] = f"REV_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
         return structured_data
     except Exception as e:
         logger.error(f"Error extracting data: {str(e)}")
         return None
     
-def save_screening_data(data, output_folder="screening_data"):
+def save_medical_review_data(data, output_folder="medical_review_data"):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = os.path.join(output_folder, f"screening_{timestamp}.json")
+    file_path = os.path.join(output_folder, f"medical_review_{timestamp}.json")
     
     with open(file_path, 'w') as f:
         json.dump(data, f, indent=2)
     
-    logger.info(f"Screening data saved to {file_path}")
+    logger.info(f"Medical review data saved to {file_path}")
     return file_path
 
 def main():
     try:
-        print("Starting patient screening process...")
+        print("Starting medical review process...")
         
         audio_file = record_audio(duration=30)
         
         transcript = transcribe_audio(audio_file)
         print(f"\nTranscript of recording:\n{transcript}\n")
         
-        screening_data = extract_screening_data(transcript)
+        medical_review_data = extract_medical_review_data(transcript)
         
-        if screening_data:
-            json_file = save_screening_data(screening_data)
-            print("\nScreening data saved successfully!")
+        if medical_review_data:
+            json_file = save_medical_review_data(medical_review_data)
+            print("\nMedical review data saved successfully!")
             print(f"JSON file location: {json_file}")
             
-            print("\nExtracted Patient Information:")
-            print(json.dumps(screening_data, indent=2))
+            print("\nExtracted Medical Review Information:")
+            print(json.dumps(medical_review_data, indent=2))
         else:
-            print("\nFailed to extract screening data. Please try again.")
+            print("\nFailed to extract medical review data. Please try again.")
             
     except Exception as e:
-        logger.error(f"Error in screening process: {str(e)}")
-        print("\nAn error occurred during the screening process. Please try again.")
+        logger.error(f"Error in medical review process: {str(e)}")
+        print("\nAn error occurred during the medical review process. Please try again.")
 
 if __name__ == "__main__":
     main()
