@@ -36,7 +36,7 @@ SCREENING_SCHEMA = {
 }
 
 def get_openai_client():
-    api_key = "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"
+    api_key = "<OPENAI-API-KEY>"
     if not api_key:
         raise ValueError("OpenAI API key not found in environment variables")
     return OpenAI(api_key=api_key)
