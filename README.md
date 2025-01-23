@@ -1,5 +1,3 @@
-# Medical Review System Setup
-
 ## Prerequisites
 
 # Install required Python packages from requirements.txt
