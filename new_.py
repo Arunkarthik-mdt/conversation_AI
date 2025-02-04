@@ -11,32 +11,8 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-SCREENING_SCHEMA = {
-    "bioData": {
-        "firstName": "",
-        "middleName": "",
-        "lastName": "",
-        "mobileNumber": "",
-        "mobileNumberCategory": "",
-        "landmark": "",
-        "nationalId": ""
-    },
-    "biometrics": {
-        "gender": "",
-        "dateOfBirth": "",
-        "age": None,
-        "height": None,
-        "weight": None,
-        "bmi": None,
-        "isRegularSmoker": None
-    },
-    "bloodPressure": {
-        "hasHypertensionHistory": None
-    }
-}
-
 def get_openai_client():
-    api_key = "<OPENAI-API-KEY>"
+    api_key = "<OPENAI_ACCESS_TOKEN>"
     if not api_key:
         raise ValueError("OpenAI API key not found in environment variables")
     return OpenAI(api_key=api_key)
@@ -65,50 +41,65 @@ def transcribe_audio(file_path):
                 file=audio_file
             )
         logger.info("Transcription successful")
-        print('************',transcription.text)
         return transcription.text
     except Exception as e:
         logger.error(f"Transcription error: {str(e)}")
         return ""
+    
+def parse_list_items(input_string):
+    if input_string:
+        return [item.strip() for item in input_string.split(",")]
+    return []
 
-def extract_screening_data(transcript):
+def extract_medical_review_data(transcript):
     client = get_openai_client()
     
     system_prompt = """
-    You are a medical screening assistant. Extract patient information from the transcript and create a JSON object that matches exactly this structure:
+    You are a medical review assistant. Extract patient information from the transcript and create a JSON object that matches exactly this structure:
     {
-        "bioData": {
-            "firstName": "string",
-            "middleName": "string (optional)",
-            "lastName": "string",
-            "mobileNumber": "string (must start with +254)",
-            "mobileNumberCategory": "string (must be one of: Personal, Family, Other)",
-            "landmark": "string",
-            "nationalId": "string"
-        },
+        "diagnosis": "string",
         "biometrics": {
-            "gender": "string (must be one of: Male, Female, Non-Binary)",
-            "dateOfBirth": "string (format: MM/DD/YYYY)",
-            "age": "number" (calculated if dateOfBirth present),
             "height": "number (in cm)",
             "weight": "number (in kg)",
             "bmi": "number (calculated if height and weight present)",
-            "isRegularSmoker": "boolean (true/false)"
+            "waistCircumference": "number (in cm)"
         },
-        "bloodPressure": {
-            "hasHypertensionHistory": "boolean (true/false)"
-        }
+        "bgAndHtn": {
+            "bloodGlucose": "number (in mg/dL)",
+            "systolicBP": "number (in mmHg)",
+            "diastolicBP": "number (in mmHg)"
+        },
+        "lifestyle": {
+            "smokingStatus": "string (must be one of: Never, Former, Current)",
+            "alcoholStatus": "string (must be one of: Never, Former, Current)",
+            "dietNutrition": "string",
+            "physicalActivity": "string"
+        },
+        "examination": {
+            "chiefComplaints": "string (comma-separated list from: Focal weakness, Shortness of breath on activity, Loss of consciousness, Palpitations (heart racing), Foot complaints, Recurrent dizziness, Fainting, Blurring of vision, Leg swelling, Other)",
+            "physicalExamination": "string (comma-separated list from: Eye Exam, Foot Exam, Neurological Exam, Mental Health, Pallor, Foetal Heartbeat, Abdominal Pelvic, Abdominal Exam, Lie & Presentation, Other)"
+        },
+        "phq9": {
+            "interest_pleasure": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "feeling_down": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "sleep_problems": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "tiredness": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "appetite": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "self_esteem": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "concentration": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "movement": "string (Not at all, Several days, More than half the days, Nearly every day)",
+            "suicidal_thoughts": "string (Not at all, Several days, More than half the days, Nearly every day)"
+        },
+        "physicianNotes": "string (retain full detail, including medical terminology, assessments, and recommendations as documented in the transcript)"
+}
+"
     }
 
     Important rules:
     1. Only extract information explicitly mentioned in the transcript
     2. Set fields to null if not mentioned
-    3. Mobile numbers must start with +254
-    4. Dates must be in DD/MM/YYYY format
-    5. Convert any yes/no responses to true/false
-    6. Calculate BMI if both height and weight are provided using: weight (kg) / (height (m))^2
-    7. Validate all fields against their required types and options
-    8. Calculate age if date of birth is present using the current date
+    3. Calculate BMI if both height and weight are provided using: weight (kg) / (height (m))^2
+    4. Validate all fields against their required types and options
     """
 
     try:
@@ -116,72 +107,109 @@ def extract_screening_data(transcript):
             model="gpt-4",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract patient screening data from this transcript and format it according to the SPICE form structure shown above: {transcript}"}
+                {"role": "user", "content": f"Extract medical review data from this transcript and format it according to the structure shown above: {transcript}"}
             ],
             temperature=0
         )
         
-        # Parse the response
-        structured_data = json.loads(response.choices[0].message.content)
+        if not response.choices[0].message.content:
+            logger.error("Empty response from OpenAI")
+            return None
+            
+        try:
+            structured_data = json.loads(response.choices[0].message.content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON response: {response.choices[0].message.content}")
+            return None
+            
+        # Parse examination data
+        examination = structured_data.get("examination", {})
         
-        # Post-process the data
-        if "bioData" in structured_data:
-            if structured_data["bioData"].get("mobileNumber"):
-                if not structured_data["bioData"]["mobileNumber"].startswith("+254"):
-                    structured_data["bioData"]["mobileNumber"] = "+254" + structured_data["bioData"]["mobileNumber"].lstrip("+")
+        # Process Chief Complaints
+        if examination.get("chiefComplaints"):
+            if isinstance(examination["chiefComplaints"], str):
+                examination["chiefComplaints"] = parse_list_items(examination["chiefComplaints"])
+            elif not isinstance(examination["chiefComplaints"], list):
+                examination["chiefComplaints"] = []
         
+        # Process Physical Examinations
+        if examination.get("physicalExamination"):
+            if isinstance(examination["physicalExamination"], str):
+                examination["physicalExamination"] = parse_list_items(examination["physicalExamination"])
+            elif not isinstance(examination["physicalExamination"], list):
+                examination["physicalExamination"] = []
+        
+        # Calculate BMI
         if "biometrics" in structured_data:
             biometrics = structured_data["biometrics"]
-            if biometrics.get("height") and biometrics.get("weight"):
-                height_m = float(biometrics["height"]) / 100
-                weight_kg = float(biometrics["weight"])
-                biometrics["bmi"] = round(weight_kg / (height_m * height_m), 2)
+            try:
+                if biometrics.get("height") and biometrics.get("weight"):
+                    height_m = float(biometrics["height"]) / 100
+                    weight_kg = float(biometrics["weight"])
+                    biometrics["bmi"] = round(weight_kg / (height_m * height_m), 2)
+            except (TypeError, ValueError) as e:
+                logger.error(f"Error calculating BMI: {str(e)}")
+                biometrics["bmi"] = None
         
-        structured_data["screeningDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        structured_data["screeningId"] = f"SCR_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+         # Add PHQ9 defaults if missing
+        if "phq9" not in structured_data:
+            structured_data["phq9"] = {
+                "interest_pleasure": None,
+                "feeling_down": None,
+                "sleep_problems": None,
+                "tiredness": None,
+                "appetite": None,
+                "self_esteem": None,
+                "concentration": None,
+                "movement": None,
+                "suicidal_thoughts": None
+            }
+        structured_data["reviewDate"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        structured_data["reviewId"] = f"REV_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
         return structured_data
+        
     except Exception as e:
         logger.error(f"Error extracting data: {str(e)}")
         return None
-    
-def save_screening_data(data, output_folder="screening_data"):
+
+def save_medical_review_data(data, output_folder="medical_review_data"):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = os.path.join(output_folder, f"screening_{timestamp}.json")
+    file_path = os.path.join(output_folder, f"medical_review_{timestamp}.json")
     
     with open(file_path, 'w') as f:
         json.dump(data, f, indent=2)
     
-    logger.info(f"Screening data saved to {file_path}")
+    logger.info(f"Medical review data saved to {file_path}")
     return file_path
 
 def main():
     try:
-        print("Starting patient screening process...")
+        print("Starting medical review process...")
         
         audio_file = record_audio(duration=30)
         
         transcript = transcribe_audio(audio_file)
         print(f"\nTranscript of recording:\n{transcript}\n")
         
-        screening_data = extract_screening_data(transcript)
+        medical_review_data = extract_medical_review_data(transcript)
         
-        if screening_data:
-            json_file = save_screening_data(screening_data)
-            print("\nScreening data saved successfully!")
+        if medical_review_data:
+            json_file = save_medical_review_data(medical_review_data)
+            print("\nMedical review data saved successfully!")
             print(f"JSON file location: {json_file}")
             
-            print("\nExtracted Patient Information:")
-            print(json.dumps(screening_data, indent=2))
+            print("\nExtracted Medical Review Information:")
+            print(json.dumps(medical_review_data, indent=2))
         else:
-            print("\nFailed to extract screening data. Please try again.")
+            print("\nFailed to extract medical review data. Please try again.")
             
     except Exception as e:
-        logger.error(f"Error in screening process: {str(e)}")
-        print("\nAn error occurred during the screening process. Please try again.")
+        logger.error(f"Error in medical review process: {str(e)}")
+        print("\nAn error occurred during the medical review process. Please try again.")
 
 if __name__ == "__main__":
     main()
