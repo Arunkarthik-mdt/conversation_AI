@@ -1,3 +1,7 @@
 screening_data/
 recorded_audio/
 __pycache__/
+caimr/
+.gitignore
+medical_review_data/
+.gradio/
